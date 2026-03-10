@@ -163,7 +163,7 @@ def main():
     df["vue_mer"] = df["description"].fillna("").str.contains("vue mer", case=False)
     df["ascenseur"] = df["description"].fillna("").str.contains("ascenseur", case=False)
 
-    output_path = "donnees/annonces_pap.csv"
+    output_path = "data/annonces_pap.csv"
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"CSV sauvegardé : {output_path}")
     print(df.head())

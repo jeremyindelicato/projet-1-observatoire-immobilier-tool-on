@@ -231,7 +231,7 @@ def main():
 
     final_df = pd.DataFrame(detail_rows)
 
-    output_path = "donnees/annonces_bienici_details.csv"
+    output_path = "data/annonces_bienici_details.csv"
     final_df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
     print(f"CSV sauvegardé : {output_path}")
