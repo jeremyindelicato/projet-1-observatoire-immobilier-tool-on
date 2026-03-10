@@ -1,4 +1,5 @@
 import streamlit as st
+from typing import Optional
 
 from app.config import DEFAULT_PERIOD, DEFAULT_SETTINGS, PERIOD_OPTIONS
 from app.services.export import dataframe_to_csv_bytes
@@ -45,17 +46,20 @@ def apply_theme_css(theme: str) -> None:
         .sidebar-logo { color: var(--text-color); border-bottom: 1px solid var(--border-color); }
         .sidebar-logo span { color: var(--accent); }
 
+        .brand-line { font-size: 1.4rem; font-weight: 700; color: var(--text-color); letter-spacing: 0.08em; }
+        .brand-sub { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.2em; }
+        .topbar-divider { height: 1px; background: var(--border-color); margin: 0.25rem 0 1rem 0; }
+
         .kpi-card { background-color: var(--card-bg); border: 1px solid var(--border-color); box-shadow: 0 8px 20px -14px rgba(0, 0, 0, 0.8); }
         .kpi-title { color: var(--muted); }
         .kpi-value, .section-title, .header-title { color: var(--text-color); }
+        .kpi-note { font-size: 0.78rem; color: var(--muted); }
         .trend-up { color: #22c55e; }
         .trend-down { color: #f87171; }
         .trend-neutral { color: var(--muted); }
 
-        [data-testid="stMarkdownContainer"], [data-testid="stText"], .stCaption, .stMarkdown, .st-emotion-cache-10trblm { color: var(--text-color); }
+        [data-testid="stMarkdownContainer"], [data-testid="stText"], .stCaption, .stMarkdown { color: var(--text-color); }
         [data-testid="stDataFrame"], [data-testid="stTable"] { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; }
-        [data-testid="stDataFrame"] * { color: var(--text-color) !important; }
-
         .stButton button, .stDownloadButton button {
             background-color: #1e293b;
             color: var(--text-color);
@@ -66,6 +70,16 @@ def apply_theme_css(theme: str) -> None:
         .badge-excellent { background-color: #14532d; color: #dcfce7; }
         .badge-good { background-color: #78350f; color: #fef3c7; }
         .badge-neutral { background-color: #334155; color: #cbd5e1; }
+
+        .data-status-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 0.8rem;
+        }
+        .status-chip { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+        .status-value { font-weight: 600; color: var(--text-color); margin-top: 0.2rem; }
+        .status-note { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
 
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
@@ -87,9 +101,14 @@ def apply_theme_css(theme: str) -> None:
         .sidebar-logo { color: var(--text-color); border-bottom: 1px solid var(--border-color); }
         .sidebar-logo span { color: var(--accent); }
 
+        .brand-line { font-size: 1.4rem; font-weight: 700; color: var(--text-color); letter-spacing: 0.08em; }
+        .brand-sub { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.2em; }
+        .topbar-divider { height: 1px; background: var(--border-color); margin: 0.25rem 0 1rem 0; }
+
         .kpi-card { background-color: var(--card-bg); border: 1px solid var(--border-color); box-shadow: 0 6px 16px -10px rgba(15, 23, 42, 0.35); }
         .kpi-title { color: var(--muted); }
         .kpi-value, .section-title, .header-title { color: var(--text-color); }
+        .kpi-note { font-size: 0.78rem; color: var(--muted); }
         .trend-up { color: #16a34a; }
         .trend-down { color: #dc2626; }
         .trend-neutral { color: var(--muted); }
@@ -100,6 +119,16 @@ def apply_theme_css(theme: str) -> None:
         .badge-excellent { background-color: #dcfce7; color: #166534; }
         .badge-good { background-color: #fef9c3; color: #854d0e; }
         .badge-neutral { background-color: #f1f5f9; color: #64748b; }
+
+        .data-status-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 0.8rem;
+        }
+        .status-chip { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+        .status-value { font-weight: 600; color: var(--text-color); margin-top: 0.2rem; }
+        .status-note { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
 
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
@@ -121,26 +150,34 @@ def sidebar_logo() -> None:
                 <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                 <polyline points="9 22 9 12 15 12 15 22"></polyline>
             </svg>
-            Nid<span>Douillet</span>
+            Tool<span>On</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.sidebar.caption("Observatoire Immobilier - Toulon")
+    st.sidebar.caption("ToolOn Observatoire Immobilier - Toulon")
 
 
 def topbar(title: str) -> None:
-    col_left, col_right = st.columns([6, 1])
-    with col_left:
+    col_brand, col_title, col_toggle = st.columns([1.2, 4, 1])
+    with col_brand:
+        st.markdown(
+            """
+        <div class="brand-line">ToolOn</div>
+        <div class="brand-sub">Observatoire Immobilier Toulon</div>
+        """,
+            unsafe_allow_html=True,
+        )
+    with col_title:
         st.markdown(f'<h1 class="header-title">{title}</h1>', unsafe_allow_html=True)
-
-    with col_right:
+    with col_toggle:
         theme = st.session_state.get("theme", "light")
         label = "🌙" if theme == "light" else "☀️"
         help_text = "Basculer en mode sombre" if theme == "light" else "Basculer en mode clair"
         if st.button(label, key="theme_toggle_btn", help=help_text, use_container_width=True):
             st.session_state["theme"] = "dark" if theme == "light" else "light"
             st.rerun()
+    st.markdown("<div class='topbar-divider'></div>", unsafe_allow_html=True)
 
 
 def page_header(export_df=None, export_filename: str = "export.csv", show_period: bool = True) -> None:
@@ -179,7 +216,13 @@ def section_title(text: str) -> None:
     st.markdown(f"<div class='section-title'>{text}</div>", unsafe_allow_html=True)
 
 
-def kpi_card(title: str, value, trend=None, trend_text: str = "vs période précédente") -> None:
+def kpi_card(
+    title: str,
+    value,
+    trend=None,
+    trend_text: str = "vs période précédente",
+    note: Optional[str] = None,
+) -> None:
     trend_html = ""
     if trend is not None:
         if trend > 0:
@@ -194,12 +237,15 @@ def kpi_card(title: str, value, trend=None, trend_text: str = "vs période préc
             f"<span style='color: var(--muted); font-weight: 500;'>{trend_text}</span></div>"
         )
 
+    note_html = f"<div class='kpi-note'>{note}</div>" if note else ""
+
     st.markdown(
         f"""
     <div class="kpi-card">
         <div class="kpi-title">{title}</div>
         <div class="kpi-value">{value}</div>
         {trend_html}
+        {note_html}
     </div>
     """,
         unsafe_allow_html=True,

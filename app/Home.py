@@ -11,17 +11,18 @@ from app.components.ui import (
     sidebar_logo,
     topbar,
 )
-from app.services.data_provider import get_listings, get_sales, get_listings_metadata
+from app.services.data_provider import get_listings, get_listings_metadata, get_sales
 from app.services.metrics import (
     build_listing_market_summary,
     build_listing_trend,
     compute_opportunity_scores,
     compute_trend_insights,
     filter_by_period,
+    get_data_status,
     get_kpis,
 )
 
-st.set_page_config(page_title="Accueil - NidDouillet", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Accueil - ToolOn", layout="wide", initial_sidebar_state="expanded")
 
 initialize_session_state()
 apply_custom_css()
@@ -29,33 +30,70 @@ sidebar_logo()
 topbar("Vue d'ensemble")
 
 period = st.session_state.get("periode", "12 derniers mois")
+sales_df = get_sales()
 base_listings = get_listings()
+trend_df = build_listing_trend(base_listings)
+meta = get_listings_metadata()
 listings_df = filter_by_period(base_listings, "date_ajout", period)
-scored_listings = compute_opportunity_scores(listings_df, get_sales())
+status = get_data_status(listings_df, sales_df, trends_df=trend_df, listings_metadata=meta)
+scored_listings = compute_opportunity_scores(listings_df, sales_df, status=status)
+kpis = get_kpis(period, listings_metadata=meta, trends_df=trend_df)
 
 page_header(export_df=scored_listings, export_filename="accueil_annonces.csv")
 
-period = st.session_state.get("periode", "12 derniers mois")
-listings_df = filter_by_period(base_listings, "date_ajout", period)
-scored_listings = compute_opportunity_scores(listings_df, get_sales())
-trend_df = build_listing_trend(base_listings)
-kpis = get_kpis(period)
-meta = get_listings_metadata()
+if not status["has_real_listings"]:
+    st.info("Mode fallback: le CSV réel n'est pas reconnu, les métriques dépendent encore des mock internes.")
 
-if meta.get("source") != "csv":
-    st.info("Mode fallback actif: les annonces proviennent d'un jeu mock car le CSV réel est absent ou inexploitable.")
+status_items = [
+    ("Listings", status["has_real_listings"], "CSV réel détecté" if status["has_real_listings"] else "Manquant"),
+    ("Quartiers", status["has_quartier"], "OK" if status["has_quartier"] else "Partiel"),
+    ("Dates", status["has_dates"], "OK" if status["has_dates"] else "Manquant"),
+    ("DVF", status["has_dvf"], "Non connecté"),
+    (
+        "Score opp.",
+        status["score_ready"],
+        "Calculable" if status["score_ready"] else "N/A - Quartier/Dates",
+    ),
+]
+with st.container():
+    st.markdown("<div class='section-title'>Qualité des données</div>", unsafe_allow_html=True)
+    cols = st.columns(len(status_items))
+    for col, (label, ok, note) in zip(cols, status_items):
+        state = "OK" if ok else "Manquant"
+        col.markdown(
+            f"""
+        <div class='data-status-card'>
+            <div class='status-chip'>{label}</div>
+            <div class='status-value'>{state}</div>
+            <div class='status-note'>{note}</div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    kpi_card("Annonces actives", f"{kpis['annonces_actives']}", kpis["trend_annonces"])
+    kpi_card("Annonces actives", f"{kpis['annonces_actives']}", kpis["trend_annonces"], note="Listings - mise à jour csv")
 with col2:
-    kpi_card("Prix médian / m²", f"{kpis['prix_median']} €", kpis["trend_prix"])
+    price_note = f"Source: {kpis.get('prix_source', 'Listings')}"
+    kpi_card("Prix médian / m²", f"{kpis['prix_median']} €", kpis.get("trend_prix"), note=price_note)
 with col3:
-    avg_score = round(float(scored_listings["score_opportunite"].mean()), 1) if not scored_listings.empty else 0.0
-    kpi_card("Score opportunité moyen", f"{avg_score}/100", None)
+    avg_score = None
+    if status["score_ready"]:
+        non_null_scores = scored_listings["score_opportunite"].dropna()
+        if not non_null_scores.empty:
+            avg_score = round(float(non_null_scores.mean()), 1)
+    score_value = f"{avg_score}/100" if avg_score is not None else "N/A"
+    score_note = (
+        "Calculé (DVF)" if status["has_dvf"] else "Calculé (Listings)"
+        if status["score_ready"]
+        else "À connecter: quartiers + dates"
+    )
+    kpi_card("Score opportunité moyen", score_value, note=score_note)
 with col4:
-    source_label = "CSV réel" if meta.get("source") == "csv" else "Fallback mock"
-    kpi_card("Source annonces", source_label, None)
+    delay_value = f"{kpis['delai_vente']} j" if kpis.get("delai_vente") else "N/A"
+    delay_note = None if kpis.get("delai_vente") else "À connecter: DVF"
+    kpi_card("Délai de vente estimé", delay_value, note=delay_note)
 
 st.markdown("<div style='height: 0.6rem;'></div>", unsafe_allow_html=True)
 
@@ -78,9 +116,9 @@ with col_chart1:
             orientation="h",
             color_discrete_sequence=["#0ea5e9"],
             labels={"prix_m2": "Prix/m²", "quartier": "Quartier"},
+            template=get_plotly_template(),
         )
         fig.update_layout(
-            template=get_plotly_template(),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=0, b=0),
@@ -92,17 +130,22 @@ with col_chart1:
 
 with col_chart2:
     section_title("Tendance prix annonces")
-    if trend_df.empty:
-        st.info("Pas de dates exploitables: tendances indisponibles.")
+    if not status["has_dates"] or trend_df.empty:
+        st.info("Données insuffisantes pour afficher les tendances annuelles.")
     else:
         insight = compute_trend_insights(trend_df, "Prix m² médian")
         st.caption(
             f"Dernier niveau: {insight['latest']} €/m² | Variation annuelle: {insight['yoy_pct']}% "
             f"({insight['delta_abs']} €/m²)"
         )
-        fig2 = px.line(trend_df, x="Date", y="Prix m² médian", color_discrete_sequence=["#10b981"])
-        fig2.update_layout(
+        fig2 = px.line(
+            trend_df,
+            x="Date",
+            y="Prix m² médian",
+            color_discrete_sequence=["#10b981"],
             template=get_plotly_template(),
+        )
+        fig2.update_layout(
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=0, b=0),

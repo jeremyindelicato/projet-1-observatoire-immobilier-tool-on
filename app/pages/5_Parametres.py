@@ -4,7 +4,7 @@ from app.components.ui import apply_custom_css, initialize_session_state, page_h
 from app.config import DEFAULT_SETTINGS
 from app.services.data_provider import get_listings_metadata
 
-st.set_page_config(page_title="Paramètres", layout="wide")
+st.set_page_config(page_title="Paramètres - ToolOn", layout="wide")
 
 initialize_session_state()
 apply_custom_css()

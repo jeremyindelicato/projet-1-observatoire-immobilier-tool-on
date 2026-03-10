@@ -14,7 +14,7 @@ from app.components.ui import (
 from app.services.data_provider import get_listings
 from app.services.metrics import build_listing_trend, compute_trend_insights
 
-st.set_page_config(page_title="Tendances", layout="wide")
+st.set_page_config(page_title="Tendances - ToolOn", layout="wide")
 
 initialize_session_state()
 apply_custom_css()

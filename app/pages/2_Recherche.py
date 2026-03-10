@@ -14,7 +14,7 @@ from app.config import SEARCH_SORT_OPTIONS
 from app.services.data_provider import get_listings, get_sales
 from app.services.metrics import compute_opportunity_scores, filter_by_period
 
-st.set_page_config(page_title="Recherche", layout="wide")
+st.set_page_config(page_title="Recherche - ToolOn", layout="wide")
 
 initialize_session_state()
 apply_custom_css()
@@ -92,8 +92,13 @@ if page_slice.empty:
 else:
     for _, row in page_slice.iterrows():
         prix_str = f"{row['prix_eur']:,.0f} €".replace(",", " ")
-        score = int(row["score_opportunite"])
-        badge_class = "badge-excellent" if score > 75 else "badge-good" if score > 50 else "badge-neutral"
+        score_value = row["score_opportunite"]
+        score_display = f"{int(score_value)}/100" if pd.notna(score_value) else "N/A"
+        if pd.notna(score_value):
+            score_int = int(score_value)
+            badge_class = "badge-excellent" if score_int > 75 else "badge-good" if score_int > 50 else "badge-neutral"
+        else:
+            badge_class = "badge-neutral"
 
         pieces = int(row["pieces"]) if pd.notna(row["pieces"]) else "N/A"
         adresse = row["adresse"] if row["adresse"] else "Adresse non renseignée"
@@ -108,7 +113,7 @@ else:
                 </div>
                 <div style="color: var(--muted); font-size: 0.875rem; display: flex; align-items: center; gap: 0.75rem;">
                     <span>{adresse}</span>
-                    <span class='badge {badge_class}'>Score: {score}/100</span>
+                    <span class='badge {badge_class}'>Score: {score_display}</span>
                 </div>
             </div>
             <div style="text-align: right;">

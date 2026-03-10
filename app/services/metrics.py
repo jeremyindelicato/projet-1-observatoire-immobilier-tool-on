@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from app.config import DEFAULT_PERIOD
-from app.services.data_provider import get_listings, get_sales
+from app.services.data_provider import get_listings, get_listings_metadata, get_sales
 
 
 def _period_timedelta(period_str: str) -> Optional[timedelta]:
@@ -39,6 +39,43 @@ def _variation_pct(current_value: float, previous_value: float) -> float:
     if previous_value <= 0:
         return 0.0
     return round(((current_value - previous_value) / previous_value) * 100, 1)
+
+
+def get_data_status(
+    listings_df: pd.DataFrame,
+    sales_df: Optional[pd.DataFrame] = None,
+    trends_df: Optional[pd.DataFrame] = None,
+    listings_metadata: Optional[dict] = None,
+) -> dict:
+    """Retourne un état des sources pour activer ou masquer les métriques."""
+    status = {
+        "has_real_listings": False,
+        "has_dates": False,
+        "has_quartier": False,
+        "has_dvf": False,
+        "has_trends": False,
+        "score_ready": False,
+        "score_source": "Listings",
+    }
+
+    if listings_metadata and listings_metadata.get("source") == "csv" and not listings_df.empty:
+        status["has_real_listings"] = True
+
+    if "date_ajout" in listings_df.columns and not listings_df["date_ajout"].empty:
+        notna_pct = listings_df["date_ajout"].notna().mean()
+        status["has_dates"] = notna_pct >= 0.3
+
+    if "quartier" in listings_df.columns and not listings_df["quartier"].empty:
+        notna_pct = listings_df["quartier"].notna().mean()
+        status["has_quartier"] = notna_pct >= 0.5
+
+    status["has_trends"] = bool(status["has_dates"] and trends_df is not None and not trends_df.empty)
+
+    # TODO: détecter automatiquement un DVF réel vs mock lorsque la source est connectée
+    status["has_dvf"] = False
+    status["score_ready"] = status["has_quartier"] and (status["has_dvf"] or status["has_dates"])
+    status["score_source"] = "DVF" if status["has_dvf"] else "Listings"
+    return status
 
 
 def filter_by_period(df: pd.DataFrame, date_col: str, period_str: str = DEFAULT_PERIOD) -> pd.DataFrame:
@@ -103,7 +140,11 @@ def build_listing_market_summary(listings_df: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values("Annonces", ascending=False)
 
 
-def compute_opportunity_scores(listings_df: pd.DataFrame, sales_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+def compute_opportunity_scores(
+    listings_df: pd.DataFrame,
+    sales_df: Optional[pd.DataFrame] = None,
+    status: Optional[dict] = None,
+) -> pd.DataFrame:
     """Calcule un score 0..100 selon reference quartier (DVF prioritaire, sinon listings)."""
     if listings_df.empty:
         out = listings_df.copy()
@@ -113,6 +154,13 @@ def compute_opportunity_scores(listings_df: pd.DataFrame, sales_df: Optional[pd.
 
     listings = listings_df.copy()
     listings["quartier"] = listings["quartier"].fillna("Inconnu").replace("", "Inconnu")
+
+    status = status or get_data_status(listings, sales_df)
+    if not status["score_ready"]:
+        listings["score_opportunite"] = pd.Series(pd.NA, index=listings.index, dtype="Int64")
+        listings["prix_reference_m2"] = pd.Series(pd.NA, index=listings.index, dtype="float")
+        listings["score_source"] = status["score_source"]
+        return listings
 
     ref_by_quartier = None
     if sales_df is not None and not sales_df.empty and {"Quartier", "Prix/m²"}.issubset(sales_df.columns):
@@ -129,6 +177,7 @@ def compute_opportunity_scores(listings_df: pd.DataFrame, sales_df: Optional[pd.
 
     raw_score = ((listings["prix_reference_m2"] - listings["prix_m2"]) / listings["prix_reference_m2"]) * 100
     listings["score_opportunite"] = raw_score.clip(lower=0, upper=100).round(0).astype(int)
+    listings["score_source"] = status["score_source"]
 
     return listings
 
@@ -177,7 +226,11 @@ def compute_trend_insights(trends_df: pd.DataFrame, series_name: str) -> dict:
     return {"latest": int(round(latest)), "yoy_pct": yoy_pct, "delta_abs": delta_abs}
 
 
-def get_kpis(period_str: str = DEFAULT_PERIOD) -> dict:
+def get_kpis(
+    period_str: str = DEFAULT_PERIOD,
+    listings_metadata: Optional[dict] = None,
+    trends_df: Optional[pd.DataFrame] = None,
+) -> dict:
     """KPIs globaux: listings reels prioritaire, DVF en fallback/appoint."""
     listings_df = get_listings().copy()
     sales_df = get_sales().copy()
@@ -223,14 +276,20 @@ def get_kpis(period_str: str = DEFAULT_PERIOD) -> dict:
     else:
         prix_median = int(round(current_median_listings)) if current_median_listings > 0 else 0
 
+    metadata = listings_metadata or get_listings_metadata()
+    trends = trends_df or build_listing_trend(listings_df)
+    status = get_data_status(listings_df, sales_df, trends_df=trends, listings_metadata=metadata)
+
     return {
         "ventes_dvf": int(len(sales_period)) if sales_available else 0,
         "dvf_loaded": bool(sales_available and not sales_period.empty),
         "annonces_actives": int(len(listings_period)),
         "prix_median": prix_median,
-        "delai_vente": 45,
+        "prix_source": "DVF" if status["has_dvf"] else "Listings",
+        "delai_vente": 45 if status["has_dvf"] else None,
         "trend_ventes": 0.0,
         "trend_annonces": _variation_pct(len(current_listings), len(previous_listings)),
-        "trend_prix": _variation_pct(current_median_30, previous_median_30),
+        "trend_prix": _variation_pct(current_median_30, previous_median_30) if status["has_dates"] else None,
         "trend_delai": 0.0,
+        "data_status": status,
     }

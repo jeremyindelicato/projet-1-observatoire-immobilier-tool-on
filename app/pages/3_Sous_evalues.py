@@ -12,7 +12,7 @@ from app.components.ui import (
 from app.services.data_provider import get_listings, get_sales
 from app.services.metrics import compute_opportunity_scores, filter_by_period
 
-st.set_page_config(page_title="Sous-évalués", layout="wide")
+st.set_page_config(page_title="Sous-évalués - ToolOn", layout="wide")
 
 initialize_session_state()
 apply_custom_css()

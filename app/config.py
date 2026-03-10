@@ -44,7 +44,7 @@ SEARCH_SORT_OPTIONS = [
 ]
 
 DEFAULT_SETTINGS = {
-    "theme": "SaaS Clair (Défaut)",
+    "theme": "light",
     "min_opportunity_score": 70,
     "rows_per_page": 12,
 }

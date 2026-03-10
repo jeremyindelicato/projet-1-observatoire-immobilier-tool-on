@@ -14,7 +14,7 @@ from app.config import QUARTIERS
 from app.services.data_provider import get_sales
 from app.services.metrics import build_market_summary, filter_by_period
 
-st.set_page_config(page_title="Marché - NidDouillet", layout="wide")
+st.set_page_config(page_title="Marché - ToolOn", layout="wide")
 
 initialize_session_state()
 apply_custom_css()
