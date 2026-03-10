@@ -74,16 +74,33 @@ def has_keyword(text: str, keyword: str) -> bool:
     return keyword.lower() in (text or "").lower()
 
 
-def scroll_page(page, steps=8, pause_ms=1500):
-    for _ in range(steps):
-        page.mouse.wheel(0, 3000)
+def scroll_until_no_new_cards(page, card_selector="article.ad-overview", max_rounds=30, pause_ms=2000):
+    previous_count = 0
+    stable_rounds = 0
+
+    for round_idx in range(max_rounds):
+        current_count = page.locator(card_selector).count()
+        print(f"[Scroll {round_idx+1}] cartes détectées : {current_count}")
+
+        if current_count == previous_count:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+
+        if stable_rounds >= 3:
+            print("Le nombre de cartes ne bouge plus, arrêt du scroll.")
+            break
+
+        previous_count = current_count
+
+        page.mouse.wheel(0, 5000)
         page.wait_for_timeout(pause_ms)
 
 
 def scrape_result_cards(page):
     page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(4000)
-    scroll_page(page, steps=10, pause_ms=1800)
+    scroll_until_no_new_cards(page, card_selector="article.ad-overview", max_rounds=40, pause_ms=2200)
 
     cards = page.locator("article.ad-overview")
     count = cards.count()
