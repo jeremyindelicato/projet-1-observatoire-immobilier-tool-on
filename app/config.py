@@ -2,7 +2,7 @@ from pathlib import Path
 
 # Chemins de base dynamiques pour lier le Dashboard a l'analyse du prof
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "donnees"
+DATA_DIR = BASE_DIR / "data"
 ANALYSIS_DIR = BASE_DIR / "analysis"
 
 # Source annonces reelles

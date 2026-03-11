@@ -15,7 +15,7 @@ from app.components.ui import (
 )
 
 CSV_CANDIDATES = [
-    Path("donnees/Annonce_immo.csv"),
+    Path("data/Annonce_immo.csv"),
     Path("Annonce_immo.csv"),
 ]
 

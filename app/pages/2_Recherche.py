@@ -20,7 +20,7 @@ sidebar_logo()
 
 # Chargement des données
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "donnees"
+DATA_DIR = BASE_DIR / "data"
 
 
 def _find_csv() -> str | None:
@@ -128,7 +128,7 @@ st.markdown("<div class='topbar-divider'></div>", unsafe_allow_html=True)
 # Chargement
 csv_path = _find_csv()
 if csv_path is None:
-    st.error("Aucun fichier CSV trouvé dans le dossier `donnees/`.")
+    st.error("Aucun fichier CSV trouvé dans le dossier `data/`.")
     st.stop()
 
 df = load_raw_csv(csv_path)
@@ -252,7 +252,7 @@ tabs_ui = st.tabs(tab_labels)
 st.markdown("<div style='height:1rem;'></div>", unsafe_allow_html=True)
 
 
-# Rendu d'une card
+# ── Rendu d'une card ──────────────────────────────────────────────────────────
 def render_card(bien: pd.Series, card_key: str) -> None:
     type_bien = str(bien.get("type_bien", "")).strip()
     icon = "🏠" if "maison" in type_bien.lower() else "🏢"
@@ -387,8 +387,6 @@ def render_fiche(bien_id: str) -> None:
         st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
         section_title("Description")
         desc_clean = re.sub(r"<[^>]+>", " ", str(desc).replace("<br>", "\n").replace("<br/>", "\n"))
-        if len(desc_clean) > 700:
-            desc_clean = desc_clean[:700] + "…"
         st.markdown(
             f'<div style="background:var(--card-bg);border:1px solid var(--border-color);'
             f'border-radius:8px;padding:1rem;font-size:0.875rem;color:var(--text-color);'
