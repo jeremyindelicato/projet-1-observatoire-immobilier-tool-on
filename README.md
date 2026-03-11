@@ -348,7 +348,7 @@ pip install -r requirements.txt
 ---
 
 Application deployee
-URL :
+URL : projet-1-observatoire-immobilier-tool-on-mljs5z2ctwygrwatx8cau.streamlit.app
 
 Repartition du travail
 Membre	Role
