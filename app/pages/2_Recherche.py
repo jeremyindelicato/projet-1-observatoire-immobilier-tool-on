@@ -27,6 +27,16 @@ DATA_DIR = BASE_DIR / "data"
 
 
 def _find_csv() -> str | None:
+    """Charge spécifiquement le fichier annonces_actuelles.csv"""
+    # Priorité 1 : annonces_actuelles.csv
+    for folder in [DATA_DIR, BASE_DIR]:
+        if not folder.exists():
+            continue
+        target = folder / "annonces_actuelles.csv"
+        if target.exists():
+            return str(target)
+
+    # Fallback : chercher d'autres fichiers d'annonces
     for folder in [DATA_DIR, BASE_DIR]:
         if not folder.exists():
             continue
@@ -39,6 +49,7 @@ def _find_csv() -> str | None:
 @st.cache_data
 def train_regression_model() -> tuple[float, float]:
     """Entraîne le modèle de régression sur les données DVF."""
+    # Charger le fichier DVF (transactions historiques), PAS les annonces
     dvf_path = DATA_DIR / "dvf_toulon.csv"
     if not dvf_path.exists():
         # Fallback sur le fichier brut si le nettoyé n'existe pas
@@ -790,3 +801,4 @@ with tabs_ui[0]:
 for i, tab_data in enumerate(open_tabs):
     with tabs_ui[i + 1]:
         render_fiche(tab_data["id_annonce"])
+
