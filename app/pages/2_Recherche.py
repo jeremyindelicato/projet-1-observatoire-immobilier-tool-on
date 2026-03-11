@@ -11,6 +11,9 @@ from app.components.ui import (
     section_title,
     sidebar_logo,
 )
+from analysis.regression import least_squares_fit
+from analysis.scoring import enrich_listing_with_model
+from analysis.knn import recommander_annonces
 
 st.set_page_config(page_title="Recherche - ToolOn", layout="wide")
 
@@ -34,7 +37,67 @@ def _find_csv() -> str | None:
 
 
 @st.cache_data
-def load_raw_csv(path: str) -> pd.DataFrame:
+def train_regression_model() -> tuple[float, float]:
+    """Entraîne le modèle de régression sur les données DVF."""
+    dvf_path = DATA_DIR / "dvf_toulon.csv"
+    if not dvf_path.exists():
+        # Fallback sur le fichier brut si le nettoyé n'existe pas
+        dvf_path = DATA_DIR / "DVF-83-Toulon-2024-2025Brut.csv"
+
+    if not dvf_path.exists():
+        return 0.0, 3000.0  # Valeurs par défaut si pas de DVF
+
+    try:
+        df_dvf = pd.read_csv(dvf_path, sep=';', encoding='utf-8')
+        df_dvf.columns = [c.strip().lower() for c in df_dvf.columns]
+
+        # Colonnes possibles pour surface et prix
+        surface_col = None
+        prix_col = None
+
+        for col in ['surface_totale', 'surface_reelle_bati', 'surface_m2', 'surface']:
+            if col in df_dvf.columns:
+                surface_col = col
+                break
+
+        for col in ['valeur_fonciere', 'prix', 'montant']:
+            if col in df_dvf.columns:
+                prix_col = col
+                break
+
+        if not surface_col or not prix_col:
+            return 0.0, 3000.0
+
+        # Conversion en numérique
+        df_dvf[surface_col] = pd.to_numeric(df_dvf[surface_col], errors='coerce')
+        df_dvf[prix_col] = pd.to_numeric(df_dvf[prix_col], errors='coerce')
+
+        # Filtrage des données valides
+        df_clean = df_dvf[
+            (df_dvf[surface_col].notna()) &
+            (df_dvf[prix_col].notna()) &
+            (df_dvf[surface_col] > 10) &  # Surface minimale
+            (df_dvf[surface_col] < 500) &  # Surface maximale
+            (df_dvf[prix_col] > 10000) &  # Prix minimal
+            (df_dvf[prix_col] < 2_000_000)  # Prix maximal
+        ].copy()
+
+        if len(df_clean) < 10:
+            return 0.0, 3000.0
+
+        # Entraînement du modèle
+        x = df_clean[surface_col].tolist()
+        y = df_clean[prix_col].tolist()
+
+        alpha, beta = least_squares_fit(x, y)
+        return alpha, beta
+
+    except Exception:
+        return 0.0, 3000.0  # Valeurs par défaut en cas d'erreur
+
+
+@st.cache_data
+def load_raw_csv(path: str, alpha: float, beta: float) -> pd.DataFrame:
     """Charge le CSV directement en conservant toutes les colonnes natives."""
     file_path = Path(path)
     raw = file_path.read_bytes()[:10000]
@@ -55,14 +118,19 @@ def load_raw_csv(path: str) -> pd.DataFrame:
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Calcul du score opportunité (écart au prix médian du quartier)
-    if "prix_m2" in df.columns and "quartier" in df.columns:
-        med_q = df.groupby("quartier")["prix_m2"].transform("median")
-        raw_score = ((med_q - df["prix_m2"]) / med_q.clip(lower=1)) * 100
-        df["score_opportunite"] = raw_score.clip(0, 100).round(0)
-    else:
-        df["score_opportunite"] = 0.0
-    return df
+
+    # Enrichissement avec le modèle de régression
+    enriched_rows = []
+    for _, row in df.iterrows():
+        listing_dict = row.to_dict()
+        # Adaptation pour la fonction d'enrichissement
+        if "surface_m2" in listing_dict:
+            listing_dict["surface"] = listing_dict["surface_m2"]
+        enriched = enrich_listing_with_model(listing_dict, alpha, beta)
+        enriched_rows.append(enriched)
+
+    df_enriched = pd.DataFrame(enriched_rows)
+    return df_enriched
 
 
 def _ensure_id_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -142,7 +210,10 @@ if csv_path is None:
     st.error("Aucun fichier CSV trouvé dans le dossier `data/`.")
     st.stop()
 
-df = load_raw_csv(csv_path)
+# Entraînement du modèle de régression
+alpha, beta = train_regression_model()
+
+df = load_raw_csv(csv_path, alpha, beta)
 df = _ensure_id_column(df)
 
 # Valeurs min/max pour les sliders
@@ -248,8 +319,9 @@ with k2:
     med = int(flt["prix"].median()) if not flt.empty and flt["prix"].notna().any() else 0
     kpi_card("Prix médian", f"{med:,} €".replace(",", "\u00a0"), None)
 with k3:
-    avg_s = round(float(flt["score_opportunite"].mean()), 1) if not flt.empty else 0.0
-    kpi_card("Score moyen", f"{avg_s}/100", None)
+    # Compter les biens sous-évalués
+    nb_opportunites = len(flt[flt["categorie"] == "opportunite"]) if "categorie" in flt.columns else 0
+    kpi_card("Biens sous-évalués", f"{nb_opportunites}", None)
 st.markdown("<div style='height:1.5rem;'></div>", unsafe_allow_html=True)
 
 # ── Onglets 
@@ -273,12 +345,24 @@ def render_card(bien: pd.Series, card_key: str) -> None:
     prix_str = _fmt_prix(bien.get("prix"))
     surf_str = _fmt_num(bien.get("surface_m2"), " m²")
     quartier = str(bien.get("quartier", "")).strip()
-    score_raw = bien.get("score_opportunite", 0)
-    try:
-        score_int = int(float(score_raw)) if _is_valid(score_raw) else 0
-    except (ValueError, TypeError):
-        score_int = 0
-    badge_cls = "badge-excellent" if score_int > 75 else "badge-good" if score_int > 50 else "badge-neutral"
+
+    # Récupération de la catégorie du modèle de régression
+    categorie = str(bien.get("categorie", "")).strip().lower()
+    ecart_pct = bien.get("ecart_pct", 0)
+
+    # Badge selon la catégorie du modèle
+    if categorie == "opportunite":
+        badge_cls = "badge-excellent"
+        badge_text = f"Sous-évalué ({abs(round(ecart_pct))}%)"
+    elif categorie == "surevalue":
+        badge_cls = "badge-neutral"
+        badge_text = f"Sur-évalué (+{abs(round(ecart_pct))}%)"
+    elif categorie == "prix_marche":
+        badge_cls = "badge-good"
+        badge_text = f"Prix marché ({round(ecart_pct):+.0f}%)"
+    else:
+        badge_cls = "badge-good"
+        badge_text = "Non classifié"
 
     st.markdown(
         f"""
@@ -292,7 +376,7 @@ def render_card(bien: pd.Series, card_key: str) -> None:
     {surf_str} &nbsp;·&nbsp; {type_bien} &nbsp;·&nbsp; {quartier}
   </div>
   <div style="margin-top:0.5rem;">
-    <span class="badge {badge_cls}">Score&nbsp;: {score_int}/100</span>
+    <span class="badge {badge_cls}" style="font-size:0.7rem;">{badge_text}</span>
   </div>
 </div>
 """,
@@ -412,22 +496,197 @@ def render_fiche(bien_id: str) -> None:
         st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
         st.link_button("Voir l'annonce →", url, type="primary")
 
-    # Partie 2 : Opportunité marché (placeholder)
+    # Partie 2 : Analyse du marché
     st.markdown("<div class='topbar-divider'></div>", unsafe_allow_html=True)
-    section_title("Opportunité marché")
+    section_title("Analyse du marché")
+
+    # Récupération des données du modèle
+    prix_estime = b.get("prix_estime", 0)
+    ecart_absolu = b.get("ecart_absolu", 0)
+    ecart_pct = b.get("ecart_pct", 0)
+    categorie = str(b.get("categorie", "")).strip()
+    insight = str(b.get("insight", "Analyse non disponible."))
+
+    # Couleur selon la catégorie
+    if categorie == "opportunite":
+        cat_color = "#2E7D32"  # Vert
+        cat_label = "Sous-évalué"
+    elif categorie == "surevalue":
+        cat_color = "#D32F2F"  # Rouge
+        cat_label = "Sur-évalué"
+    elif categorie == "prix_marche":
+        cat_color = "#1976D2"  # Bleu
+        cat_label = "Prix marché"
+    else:
+        cat_color = "#757575"  # Gris
+        cat_label = "Non classifié"
+
+    # Affichage de l'analyse
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        st.markdown(
+            f"""
+<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+            padding:1.5rem;height:100%;">
+  <div style="font-size:0.9rem;font-weight:600;color:var(--muted);margin-bottom:1rem;">
+    Classification
+  </div>
+  <div style="text-align:center;padding:3rem 0;">
+    <div style="font-size:1.5rem;font-weight:700;color:{cat_color};">
+      {cat_label}
+    </div>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    with col_b:
+        st.markdown(
+            f"""
+<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+            padding:1.5rem;height:100%;">
+  <div style="font-size:0.9rem;font-weight:600;color:var(--muted);margin-bottom:1rem;">
+    Analyse de prix
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:0.7rem 0;
+              border-bottom:1px solid var(--border-color);">
+    <span style="color:var(--muted);font-size:0.85rem;">Prix annoncé</span>
+    <span style="color:var(--text-color);font-weight:600;font-size:0.9rem;">
+      {_fmt_prix(b.get("prix"))}
+    </span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:0.7rem 0;
+              border-bottom:1px solid var(--border-color);">
+    <span style="color:var(--muted);font-size:0.85rem;">Prix estimé (modèle)</span>
+    <span style="color:var(--text-color);font-weight:600;font-size:0.9rem;">
+      {_fmt_prix(prix_estime)}
+    </span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:0.7rem 0;
+              border-bottom:1px solid var(--border-color);">
+    <span style="color:var(--muted);font-size:0.85rem;">Écart absolu</span>
+    <span style="color:{cat_color};font-weight:700;font-size:0.9rem;">
+      {ecart_absolu:+.0f} €
+    </span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:0.7rem 0;">
+    <span style="color:var(--muted);font-size:0.85rem;">Écart relatif</span>
+    <span style="color:{cat_color};font-weight:700;font-size:1.1rem;">
+      {ecart_pct:+.1f}%
+    </span>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    # Insight
+    st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
     st.markdown(
-        """
-<div style="background:var(--card-bg);border:2px dashed var(--border-color);border-radius:12px;
-            padding:2.5rem 2rem;text-align:center;color:var(--muted);">
-  <div style="font-size:2rem;margin-bottom:0.5rem;"></div>
-  <div style="font-size:0.95rem;font-weight:600;">Section à venir</div>
-  <div style="font-size:0.82rem;margin-top:0.3rem;">
-    L'analyse de l'opportunité marché sera complétée ultérieurement.
+        f"""
+<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+            padding:1.5rem;">
+  <div style="font-size:0.9rem;font-weight:600;color:var(--muted);margin-bottom:0.75rem;">
+    Analyse
+  </div>
+  <div style="font-size:0.9rem;color:var(--text-color);line-height:1.6;">
+    {insight}
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
+
+    # Partie 3 : Recommandations KNN
+    st.markdown("<div class='topbar-divider'></div>", unsafe_allow_html=True)
+    section_title("Biens similaires (recommandations)")
+
+    def clean_dict(d):
+        """Nettoie un dictionnaire en remplaçant les NaN par None."""
+        cleaned = {}
+        for key, value in d.items():
+            if pd.isna(value):
+                cleaned[key] = None
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    # Récupération des recommandations
+    try:
+        # Préparer le catalogue (tous les biens sauf le bien actuel)
+        df_catalogue = df[df["id_annonce"] != bien_id]
+        catalogue_annonces = [clean_dict(row) for _, row in df_catalogue.iterrows()]
+
+        if len(catalogue_annonces) > 0:
+            # Obtenir les recommandations
+            bien_dict = clean_dict(b.to_dict())
+            recommendations = recommander_annonces(bien_dict, catalogue_annonces, k=6)
+
+            if recommendations:
+                st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
+
+                # Affichage en grille 3 colonnes
+                n_reco = len(recommendations)
+                n_rows = (n_reco + 2) // 3
+
+                for row_i in range(n_rows):
+                    cols = st.columns(3)
+                    for col_i, col in enumerate(cols):
+                        idx = row_i * 3 + col_i
+                        if idx < n_reco:
+                            distance, similarite, reco = recommendations[idx]
+
+                            with col:
+                                reco_type = str(reco.get("type_bien", "")).strip()
+                                reco_icon = "🏠" if "maison" in reco_type.lower() else "🏢"
+                                reco_titre = str(reco.get("titre", "Bien immobilier"))
+                                reco_titre_short = reco_titre[:40] + "…" if len(reco_titre) > 40 else reco_titre
+                                reco_prix = _fmt_prix(reco.get("prix"))
+                                reco_surf = _fmt_num(reco.get("surface_m2"), " m²")
+                                reco_quartier = str(reco.get("quartier", "")).strip()
+
+                                # Badge de similarité
+                                if similarite > 80:
+                                    sim_cls = "badge-excellent"
+                                elif similarite > 60:
+                                    sim_cls = "badge-good"
+                                else:
+                                    sim_cls = "badge-neutral"
+
+                                st.markdown(
+                                    f"""
+<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+            padding:1rem;margin-bottom:0.5rem;min-height:160px;">
+  <div style="font-size:1.4rem;line-height:1;">{reco_icon}</div>
+  <div style="font-weight:600;font-size:0.8rem;color:var(--text-color);
+              margin:0.3rem 0;min-height:2.4em;line-height:1.2;overflow:hidden;">{reco_titre_short}</div>
+  <div style="font-size:1rem;font-weight:700;color:var(--accent);">{reco_prix}</div>
+  <div style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem;">
+    {reco_surf} · {reco_quartier}
+  </div>
+  <div style="margin-top:0.4rem;">
+    <span class="badge {sim_cls}" style="font-size:0.65rem;">Similarité : {similarite:.0f}%</span>
+  </div>
+</div>
+""",
+                                    unsafe_allow_html=True,
+                                )
+
+                                # Bouton pour ouvrir la fiche
+                                reco_id = str(reco.get("id_annonce", ""))
+                                if st.button("Voir la fiche", key=f"reco_{bien_id}_{reco_id}", use_container_width=True, type="secondary"):
+                                    if reco_id not in [t["id_annonce"] for t in st.session_state["open_tabs"]]:
+                                        st.session_state["open_tabs"].append({"id_annonce": reco_id, "titre": reco_titre[:40]})
+                                    st.rerun()
+            else:
+                st.info("Aucune recommandation disponible pour ce bien.")
+        else:
+            st.info("Pas assez de biens dans le catalogue pour générer des recommandations.")
+
+    except Exception as e:
+        st.warning(f"Impossible de générer les recommandations : {str(e)}")
 
 
 # Onglet 0 : Résultats 
