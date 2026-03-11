@@ -490,6 +490,68 @@ def render_fiche(bien_id: str) -> None:
             unsafe_allow_html=True,
         )
 
+    # Caractéristiques détectées depuis la description
+    infos_desc = b.get("infos_description", {})
+    if infos_desc and isinstance(infos_desc, dict):
+        st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
+        section_title("Caractéristiques détectées")
+
+        # Construction des badges pour les équipements
+        badges_html = []
+
+        # Équipements principaux
+        if infos_desc.get("vue_mer"):
+            badges_html.append('<span class="badge badge-excellent" style="margin:0.25rem;">Vue mer</span>')
+        if infos_desc.get("terrasse"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Terrasse</span>')
+        if infos_desc.get("balcon"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Balcon</span>')
+        if infos_desc.get("parking"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Parking</span>')
+        if infos_desc.get("garage"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Garage</span>')
+        if infos_desc.get("ascenseur"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Ascenseur</span>')
+        if infos_desc.get("piscine"):
+            badges_html.append('<span class="badge badge-excellent" style="margin:0.25rem;">Piscine</span>')
+
+        # État du bien
+        if infos_desc.get("renove"):
+            badges_html.append('<span class="badge badge-excellent" style="margin:0.25rem;">Rénové</span>')
+        if infos_desc.get("travaux"):
+            badges_html.append('<span class="badge badge-neutral" style="margin:0.25rem;">Travaux à prévoir</span>')
+
+        # Qualités
+        if infos_desc.get("lumineux"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Lumineux</span>')
+        if infos_desc.get("calme"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Calme</span>')
+
+        # Étage
+        if infos_desc.get("dernier_etage"):
+            badges_html.append('<span class="badge badge-good" style="margin:0.25rem;">Dernier étage</span>')
+        elif infos_desc.get("etage") is not None:
+            etage_num = infos_desc.get("etage")
+            badges_html.append(f'<span class="badge badge-neutral" style="margin:0.25rem;">Étage {etage_num}</span>')
+
+        if badges_html:
+            st.markdown(
+                f"""
+<div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+            padding:1.25rem;">
+  <div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem;">
+    Informations extraites automatiquement de la description
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:0.25rem;">
+    {"".join(badges_html)}
+  </div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("Aucune caractéristique spécifique détectée dans la description.")
+
     # Bouton annonce
     url = str(b.get("url", "")).strip()
     if url and url not in ("nan", "none", ""):
